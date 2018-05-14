@@ -25,6 +25,9 @@ public class MainActivity extends AppCompatActivity {
     private float speed;
     private float max_speed;
     private float avg_speed;
+    private float speed_sum;
+    private float count;
+
     //private Button button;
 
 
@@ -36,8 +39,10 @@ public class MainActivity extends AppCompatActivity {
         text = (TextView) findViewById(R.id.textView4);//ID of the widget to input speed value
         text2 = (TextView) findViewById(R.id.textView6);//ID of widget for max speed val
         text3 = (TextView) findViewById(R.id.textView8);//ID of widget for avg speed
-
+        speed_sum=0;
         max_speed=0;//initialized at zero
+        count=0;
+
 
 
         locationManager = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
@@ -45,14 +50,17 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onLocationChanged(Location location) {//if the gps location changes
                 speed = location.getSpeedAccuracyMetersPerSecond();//returns speed
+                speed_sum+=speed;//adds all speeds together
+                count++;
                 if(speed>max_speed){ //sets max speed
                     max_speed = speed;
                 }
-                if(speed<0.5){//will update when user is no longer moving. Too sensitive to ever get zero
+                if(speed<0.9){//will update when user is no longer moving. Too sensitive to ever get zero
                     text.setText("Not Moving");
+                }else {
+                    text.setText(speed+" m/s");//sets this textView to now be the speed value
                 }
-                avg_speed = max_speed/2;//placed here so is constantly updated
-                text.setText(speed+" m/s");//sets this textView to now be the speed value
+                avg_speed = speed_sum/count;//sum of speeds over count of changes
                 text2.setText(max_speed+" m/s");
                 text3.setText(avg_speed+" m/s");
             }
