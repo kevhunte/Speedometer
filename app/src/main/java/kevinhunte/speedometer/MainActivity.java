@@ -1,6 +1,7 @@
 package kevinhunte.speedometer;
 
 import android.Manifest;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -13,6 +14,15 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
+
+import com.google.android.gms.location.ActivityTransition;//activity recognition
+import com.google.android.gms.location.ActivityTransitionRequest;
+import com.google.android.gms.location.DetectedActivity;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -28,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private float speed_sum;
     private float count;
 
+
     //private Button button;
 
 
@@ -36,14 +47,31 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        text = (TextView) findViewById(R.id.textView4);//ID of the widget to input speed value
-        text2 = (TextView) findViewById(R.id.textView6);//ID of widget for max speed val
-        text3 = (TextView) findViewById(R.id.textView8);//ID of widget for avg speed
+        text = findViewById(R.id.textView4);//ID of the widget to input speed value
+        text2 = findViewById(R.id.textView6);//ID of widget for max speed val
+        text3 = findViewById(R.id.textView8);//ID of widget for avg speed
         speed_sum=0;
         max_speed=0;//initialized at zero
         count=0;
+        List<ActivityTransition> transitions = new ArrayList<>();//works by downgrading to sdk 26 (Oreo 8.0)
+        PendingIntent pending = PendingIntent.getActivity(Context.ACTIVITY_SERVICE,0,Intent.FLAG_ACTIVITY_NEW_TASK,FLAG_UPDATE_CURRENT);
 
+        transitions.add(new ActivityTransition.Builder()
+                        .setActivityType(DetectedActivity.STILL)
+                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                        .build());//keeps track of user staying still
 
+        transitions.add(new ActivityTransition.Builder()
+                        .setActivityType(DetectedActivity.RUNNING)
+                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                        .build());//keeps track of user running
+
+        transitions.add(new ActivityTransition.Builder()
+                        .setActivityType(DetectedActivity.WALKING)
+                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                        .build());//keeps track of user walking
+
+        ActivityTransitionRequest request = new ActivityTransitionRequest(transitions);//uses activities added above
 
         locationManager = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
         locationListener = new LocationListener() {
@@ -79,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
             public void onProviderDisabled(String provider) {//if gps is turned off, offer option to turn on
                 Intent _intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);//goes to settings
                 startActivity(_intent);
-                //MAKE LESS SUDDEN
+                //TODO: Make change less sudden
             }
         };
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
