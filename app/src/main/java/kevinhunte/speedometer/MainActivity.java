@@ -1,7 +1,9 @@
 package kevinhunte.speedometer;
 
 import android.Manifest;
+import android.app.IntentService;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -11,15 +13,25 @@ import android.location.LocationManager;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.transition.Transition;
+import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.internal.Constants;
 import com.google.android.gms.location.ActivityRecognition;
+import com.google.android.gms.location.ActivityRecognitionClient;
 import com.google.android.gms.location.ActivityTransition;//activity recognition
 import com.google.android.gms.location.ActivityTransitionRequest;
 import com.google.android.gms.location.DetectedActivity;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
@@ -32,16 +44,28 @@ import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 
 public class MainActivity extends AppCompatActivity {
 
+    private final static String LOG_TAG = MainActivity.class.getSimpleName();
+    public static final String BROADCAST_DETECTED_ACTIVITY = "activity_intent";
+    private String message;
+    private BroadcastReceiver broadcastReceiver;//for getting pending intent data
     private LocationManager locationManager;//used to access gps
     private LocationListener locationListener;
     private TextView text;
     private TextView text2;
     private TextView text3;
+    private TextView textactivity;
+    private Button Rec_on;
+    private Button Rec_off;
     private float speed;
     private float max_speed;
     private float avg_speed;
     private float speed_sum;
     private float count;
+    private List<ActivityTransition> transitions;
+    private ActivityRecognitionClient activityRecognitionClient;
+    private PendingIntent transitionPendingIntent;
+    private Context mContext;
+    private TransitionIntentService bridge;
 
 
     //private Button button;
@@ -55,52 +79,65 @@ public class MainActivity extends AppCompatActivity {
         text = findViewById(R.id.textView4);//ID of the widget to input speed value
         text2 = findViewById(R.id.textView6);//ID of widget for max speed val
         text3 = findViewById(R.id.textView8);//ID of widget for avg speed
+        textactivity = findViewById(R.id.textView2);//ID for activity rec
+        Rec_on = findViewById(R.id.button2);
+        Rec_off = findViewById(R.id.button3);
+        message ="";
         speed_sum=0;
         max_speed=0;//initialized at zero
         count=0;
-        /** CODE FOR ACTIVITY RECOGNITION **/
-        List<ActivityTransition> transitions = new ArrayList<>();//works by downgrading to sdk 26 (Oreo 8.0)
-        Intent in = new Intent(this, ActivityTransition.class);//TODO: check if should be linked to this class
-        //pending intent will be called from this window, arbitrary code, place to send once activated,will be continuously updated by gps
-        PendingIntent pending = PendingIntent.getActivity(MainActivity.this,0,in,FLAG_UPDATE_CURRENT);
+        bridge = new TransitionIntentService();
+
+        /** INIT ACTIVITY RECOGNITION **/
+        mContext=this;//link context with info from this class
+        activityRecognitionClient=ActivityRecognition.getClient(mContext);
+        Intent intent = new Intent(this, TransitionIntentService.class);
+        transitionPendingIntent = PendingIntent.getService(this,100,intent,PendingIntent.FLAG_UPDATE_CURRENT);
+
+        transitions = new ArrayList<>();
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.STILL)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
 
         transitions.add(new ActivityTransition.Builder()
-                        .setActivityType(DetectedActivity.STILL)
-                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                        .build());//keeps track of user staying still
+                .setActivityType(DetectedActivity.STILL)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
 
         transitions.add(new ActivityTransition.Builder()
-                        .setActivityType(DetectedActivity.RUNNING)
-                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                        .build());//keeps track of user running
+                .setActivityType(DetectedActivity.RUNNING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
 
         transitions.add(new ActivityTransition.Builder()
-                        .setActivityType(DetectedActivity.WALKING)
-                        .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                        .build());//keeps track of user walking
+                .setActivityType(DetectedActivity.RUNNING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
 
-        ActivityTransitionRequest request = new ActivityTransitionRequest(transitions);//uses activities added above
-        Task<Void> task = ActivityRecognition.getClient(this).requestActivityTransitionUpdates(request,pending);
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.WALKING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
 
-        task.addOnSuccessListener(
-                new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        //print what the user is doing?
-                    }
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.WALKING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
+
+        broadcastReceiver = new BroadcastReceiver() {//gets data from Activity Transition
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.getAction().equals("activity_intent")) {
+                    String type = intent.getStringExtra("type");
+                    String transition = intent.getStringExtra("transition");
+                    Log.e(LOG_TAG,"WORKING: Activity Type: "+type+"Transition: "+transition);
                 }
-        );
+            }
+        };
+        /** ---------------- **/
 
-        task.addOnFailureListener(
-                new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        //when doesn't work?
-                    }
-                }
-        );
-
-
+        /** GPS Speedometer Logic **/
         locationManager = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
         locationListener = new LocationListener() {
             @Override
@@ -114,11 +151,11 @@ public class MainActivity extends AppCompatActivity {
                 if(speed<0.9){//will update when user is no longer moving. Too sensitive to ever get zero
                     text.setText("Not Moving");
                 }else {
-                    text.setText(speed+" m/s");//sets this textView to now be the speed value
+                    text.setText("Current Speed: "+speed+" m/s");//sets this textView to now be the speed value
                 }
                 avg_speed = speed_sum/count;//sum of speeds over count of changes
-                text2.setText(max_speed+" m/s");
-                text3.setText(avg_speed+" m/s");
+                text2.setText("Max Speed: "+max_speed+" m/s");
+                text3.setText("Avg Speed: "+avg_speed+" m/s");
             }
 
             @Override
@@ -133,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onProviderDisabled(String provider) {//if gps is turned off, offer option to turn on
+                Toast.makeText(mContext,"Speedometer App needs GPS",Toast.LENGTH_LONG).show();
                 Intent _intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);//goes to settings
                 startActivity(_intent);
             }
@@ -147,6 +185,63 @@ public class MainActivity extends AppCompatActivity {
         }
 
         locationManager.requestLocationUpdates(locationManager.GPS_PROVIDER, 0, 0, locationListener);//updates location as frequently as possible
+        /** --------------- **/
+    }
+
+    public void registerHandler(View view) {
+        final ActivityTransitionRequest activityTransitionRequest = new ActivityTransitionRequest(transitions);//list activities added above
+        Task<Void> task = activityRecognitionClient.requestActivityTransitionUpdates(activityTransitionRequest,transitionPendingIntent);//keeps connection alive
+        task.addOnSuccessListener(new OnSuccessListener<Void>() {
+            @Override
+            public void onSuccess(Void aVoid) {
+                /**Start tracking not needed to run on emulator, makes second thread*/
+                //startTracking();//creates intent to call service
+                Toast.makeText(mContext,"Transition Rec On",Toast.LENGTH_LONG).show();
+
+            }
+        });
+
+        task.addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Toast.makeText(mContext,"Transition rec didn't work",Toast.LENGTH_LONG).show();
+                e.printStackTrace();//print error
+            }
+        });
+    }
+
+
+    public void deregisterHandler(View view) {
+        Task<Void> task = activityRecognitionClient.removeActivityTransitionUpdates(transitionPendingIntent);
+        task.addOnSuccessListener(new OnSuccessListener<Void>() {
+            @Override
+            public void onSuccess(Void aVoid) {
+                transitionPendingIntent.cancel();
+                /**Start tracking not needed to run on emulator, makes second thread. Neither is stop tracking*/
+                //stopTracking();
+                Toast.makeText(mContext, "Activity Transition Off", Toast.LENGTH_LONG).show();
+
+            }
+        });
+
+        task.addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Toast.makeText(mContext, "Remove Activity Transition Failed", Toast.LENGTH_LONG).show();
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /**Activates activity rec*/
+    private void startTracking() {
+        Intent intent = new Intent(this, TransitionIntentService.class);
+        startService(intent);
+    }
+    /**Turns it off*/
+    private void stopTracking(){
+        Intent intent = new Intent(this, TransitionIntentService.class);
+        stopService(intent);
     }
 
     public void startMessage(View view){//action taken when start button is pressed.
@@ -157,7 +252,31 @@ public class MainActivity extends AppCompatActivity {
         //String message = editText.getText().toString();
         //intent.putExtra(EXTRA_MESSAGE, message);
         startActivity(intent);//launches new intent, which opens new activity(window)
-
     }
+
+    /** For testing purposes
+
+
+    protected ArrayList<String> getPermissions()
+    {
+        ArrayList<String> permissions = new ArrayList<String>();
+        permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        return permissions;
+    }
+
+    protected boolean permissionGranted()
+    {
+        for (String permission : getPermissions())
+        {//updated from method. checks writing permission at runtime. Returns -1 until granted by user.
+            if (ContextCompat.checkSelfPermission(this,permission) != PackageManager.PERMISSION_GRANTED)
+            {
+                    Log.d(LOG_TAG,"DEBUGGING. Truth value for checkSelfPermission: "+ContextCompat.checkSelfPermission(this,permission));
+                    Log.d(LOG_TAG, "Missing permission (for data logging): " + permission);//why is it not recognized?
+                throw new NullPointerException("Missing permission: " + permission);
+            }
+        }
+        return true;
+    }
+    /** --------------- **/
 
 }
