@@ -64,8 +64,6 @@ public class MainActivity extends AppCompatActivity {
     private ActivityRecognitionClient activityRecognitionClient;
     private PendingIntent transitionPendingIntent;
     private Context mContext;
-    private TransitionIntentService bridge;
-
 
     //private Button button;
 
@@ -85,7 +83,6 @@ public class MainActivity extends AppCompatActivity {
         speed_sum=0;
         max_speed=0;//initialized at zero
         count=0;
-        bridge = new TransitionIntentService();
 
         /** INIT ACTIVITY RECOGNITION **/
         mContext=this;//link context with info from this class
