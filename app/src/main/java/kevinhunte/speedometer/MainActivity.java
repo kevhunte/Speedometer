@@ -6,6 +6,7 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
@@ -25,7 +26,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.common.internal.Constants;
 import com.google.android.gms.location.ActivityRecognition;
 import com.google.android.gms.location.ActivityRecognitionClient;
 import com.google.android.gms.location.ActivityTransition;//activity recognition
@@ -47,13 +47,12 @@ public class MainActivity extends AppCompatActivity {
     private final static String LOG_TAG = MainActivity.class.getSimpleName();
     public static final String BROADCAST_DETECTED_ACTIVITY = "activity_intent";
     private String message;
-    private BroadcastReceiver broadcastReceiver;//for getting pending intent data
     private LocationManager locationManager;//used to access gps
     private LocationListener locationListener;
     private TextView text;
     private TextView text2;
     private TextView text3;
-    private TextView textactivity;
+    public TextView textactivity;
     private Button Rec_on;
     private Button Rec_off;
     private float speed;
@@ -125,16 +124,8 @@ public class MainActivity extends AppCompatActivity {
                 .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
                 .build());
 
-        broadcastReceiver = new BroadcastReceiver() {//gets data from Activity Transition
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (intent.getAction().equals("activity_intent")) {
-                    String type = intent.getStringExtra("type");
-                    String transition = intent.getStringExtra("transition");
-                    Log.e(LOG_TAG,"WORKING: Activity Type: "+type+"Transition: "+transition);
-                }
-            }
-        };
+        //registers broadcast receiver made. Will only receive information from thread running in Trans intent service
+        LocalBroadcastManager.getInstance(this).registerReceiver(broadcastReceiver,new IntentFilter("activityRec_intent"));
         /** ---------------- **/
 
         /** GPS Speedometer Logic **/
@@ -186,9 +177,21 @@ public class MainActivity extends AppCompatActivity {
 
         locationManager.requestLocationUpdates(locationManager.GPS_PROVIDER, 0, 0, locationListener);//updates location as frequently as possible
         /** --------------- **/
+        registerHandler();//calls activity rec on creation of window
     }
 
-    public void registerHandler(View view) {
+    /** member var for receiving act rec*/
+    private BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {//gets data from Activity Transition
+        @Override
+        public void onReceive(Context context, Intent intent) {
+                String type = intent.getStringExtra("type");
+                String transition = intent.getStringExtra("transition");
+                Log.i(LOG_TAG,"Broadcast Received: Activity Type: "+type+" Transition: "+transition);
+                textactivity.setText("User "+transition+type+" position");
+        }
+    };
+
+    public void registerHandler() {//add View View to start by widget
         final ActivityTransitionRequest activityTransitionRequest = new ActivityTransitionRequest(transitions);//list activities added above
         Task<Void> task = activityRecognitionClient.requestActivityTransitionUpdates(activityTransitionRequest,transitionPendingIntent);//keeps connection alive
         task.addOnSuccessListener(new OnSuccessListener<Void>() {
@@ -197,7 +200,6 @@ public class MainActivity extends AppCompatActivity {
                 /**Start tracking not needed to run on emulator, makes second thread*/
                 //startTracking();//creates intent to call service
                 Toast.makeText(mContext,"Transition Rec On",Toast.LENGTH_LONG).show();
-
             }
         });
 
