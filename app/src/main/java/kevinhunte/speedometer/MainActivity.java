@@ -2,6 +2,8 @@ package kevinhunte.speedometer;
 
 import android.Manifest;
 import android.app.IntentService;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -11,8 +13,11 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.Build;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.annotation.RequiresPermission;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.content.LocalBroadcastManager;
@@ -25,6 +30,7 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.location.ActivityRecognition;
 import com.google.android.gms.location.ActivityRecognitionClient;
@@ -42,10 +48,12 @@ import java.util.List;
 import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     private final static String LOG_TAG = MainActivity.class.getSimpleName();
     public static final String BROADCAST_DETECTED_ACTIVITY = "activity_intent";
+    public static final String CHANNEL_ID = "ForegroundService";
+    GoogleApiClient googleApiClient;
     private String message;
     private LocationManager locationManager;//used to access gps
     private LocationListener locationListener;
@@ -61,7 +69,7 @@ public class MainActivity extends AppCompatActivity {
     private float speed_sum;
     private float count;
     private List<ActivityTransition> transitions;
-    private ActivityRecognitionClient activityRecognitionClient;
+    //private ActivityRecognitionClient activityRecognitionClient;
     private PendingIntent transitionPendingIntent;
     private Context mContext;
 
@@ -73,12 +81,12 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        googleApiClient = new GoogleApiClient.Builder(this).addApi(ActivityRecognition.API).addConnectionCallbacks(this).addOnConnectionFailedListener(this).build();
+        googleApiClient.connect();
         text = findViewById(R.id.textView4);//ID of the widget to input speed value
         text2 = findViewById(R.id.textView6);//ID of widget for max speed val
         text3 = findViewById(R.id.textView8);//ID of widget for avg speed
         textactivity = findViewById(R.id.textView2);//ID for activity rec
-        Rec_on = findViewById(R.id.button2);
-        Rec_off = findViewById(R.id.button3);
         message ="";
         speed_sum=0;
         max_speed=0;//initialized at zero
@@ -86,11 +94,12 @@ public class MainActivity extends AppCompatActivity {
 
         /** INIT ACTIVITY RECOGNITION **/
         mContext=this;//link context with info from this class
-        activityRecognitionClient=ActivityRecognition.getClient(mContext);
-        Intent intent = new Intent(this, TransitionIntentService.class);
-        transitionPendingIntent = PendingIntent.getService(this,100,intent,PendingIntent.FLAG_UPDATE_CURRENT);
+        //activityRecognitionClient=ActivityRecognition.getClient(mContext);
+        //Intent intent = new Intent(this, TransitionIntentService.class);
+        //TODO testing for a sec. Mess with getForegroundService and getService
+        //transitionPendingIntent = PendingIntent.getService(this,100,intent,PendingIntent.FLAG_UPDATE_CURRENT);
 
-        transitions = new ArrayList<>();
+        /**transitions = new ArrayList<>();
         transitions.add(new ActivityTransition.Builder()
                 .setActivityType(DetectedActivity.STILL)
                 .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
@@ -119,9 +128,9 @@ public class MainActivity extends AppCompatActivity {
         transitions.add(new ActivityTransition.Builder()
                 .setActivityType(DetectedActivity.WALKING)
                 .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
-                .build());
+                .build());*/
 
-        //registers broadcast receiver made. Will only receive information from thread running in Trans intent service
+        //registers broadcast receiver made. Will only receive information from background thread running in Trans intent service
         LocalBroadcastManager.getInstance(this).registerReceiver(broadcastReceiver,new IntentFilter("activityRec_intent"));
         /** ---------------- **/
 
@@ -138,7 +147,12 @@ public class MainActivity extends AppCompatActivity {
                 }
                 if(speed<0.9){//will update when user is no longer moving. Too sensitive to ever get zero
                     text.setText("Not Moving");
-                }else {
+                }else if(speed>=0.9 && speed<2.0){
+                    text.setText("Walking");
+                }else if(speed>=2.0&&speed<4.5){
+                    text.setText("Running");
+                }
+                else {
                     text.setText("Current Speed: "+speed+" m/s");//sets this textView to now be the speed value
                 }
                 avg_speed = speed_sum/count;//sum of speeds over count of changes
@@ -163,7 +177,9 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(_intent);
             }
         };
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{//permissions needed for gps
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     //Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -171,10 +187,21 @@ public class MainActivity extends AppCompatActivity {
             }, 5);//5 is arbitrary
             return;
         }
+        /**
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission_group.LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{//permissions needed for gps
+                    Manifest.permission_group.LOCATION,
+                    //Manifest.permission.ACCESS_COARSE_LOCATION,
+                    //Manifest.permission.INTERNET
+            }, 5);//5 is arbitrary
+            return;
+        }
+        */
 
         locationManager.requestLocationUpdates(locationManager.GPS_PROVIDER, 0, 0, locationListener);//updates location as frequently as possible
         /** --------------- **/
-        registerHandler();//calls activity rec on creation of window
+        //registerHandler();//calls activity rec on creation of window
+        //createNotificationChannel();
     }
 
     /** member var for receiving act rec*/
@@ -188,14 +215,34 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    /**
     public void registerHandler() {//add View View to start by widget
         final ActivityTransitionRequest activityTransitionRequest = new ActivityTransitionRequest(transitions);//list activities added above
         Task<Void> task = activityRecognitionClient.requestActivityTransitionUpdates(activityTransitionRequest,transitionPendingIntent);//keeps connection alive
         task.addOnSuccessListener(new OnSuccessListener<Void>() {
             @Override
             public void onSuccess(Void aVoid) {
-                /**Start tracking not needed to run on emulator, makes second thread*/
                 //startTracking();//creates intent to call service
+                Toast.makeText(mContext,"Transition Rec On",Toast.LENGTH_LONG).show();
+            }
+        });
+
+        task.addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Toast.makeText(mContext,"Transition rec didn't work",Toast.LENGTH_LONG).show();
+                e.printStackTrace();//print error
+            }
+        });
+    }
+
+    public void registerHandler(View view) {//add View View to start by widget
+        final ActivityTransitionRequest activityTransitionRequest = new ActivityTransitionRequest(transitions);//list activities added above
+        Task<Void> task = activityRecognitionClient.requestActivityTransitionUpdates(activityTransitionRequest,transitionPendingIntent);//keeps connection alive
+        task.addOnSuccessListener(new OnSuccessListener<Void>() {
+            @Override
+            public void onSuccess(Void aVoid) {
+                startTracking();//creates intent to call service
                 Toast.makeText(mContext,"Transition Rec On",Toast.LENGTH_LONG).show();
             }
         });
@@ -216,8 +263,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(Void aVoid) {
                 transitionPendingIntent.cancel();
-                /**Start tracking not needed to run on emulator, makes second thread. Neither is stop tracking*/
-                //stopTracking();
+                stopTracking();
                 Toast.makeText(mContext, "Activity Transition Off", Toast.LENGTH_LONG).show();
 
             }
@@ -232,15 +278,29 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /**Activates activity rec*/
     private void startTracking() {
         Intent intent = new Intent(this, TransitionIntentService.class);
         startService(intent);
     }
-    /**Turns it off*/
     private void stopTracking(){
         Intent intent = new Intent(this, TransitionIntentService.class);
         stopService(intent);
+    }*/
+
+    private void createNotificationChannel() {
+        // Create the NotificationChannel, but only on API 26+ because
+        // the NotificationChannel class is new and not in the support library
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            CharSequence name = getString(R.string.app_name);
+            String description = getString(R.string.app_name);
+            int importance = NotificationManager.IMPORTANCE_LOW;//can be set to default, low or high
+            NotificationChannel channel = new NotificationChannel("TransitionIntentService", name, importance);
+            channel.setDescription(description);
+            // Register the channel with the system; you can't change the importance
+            // or other notification behaviors after this
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
     }
 
     public void startMessage(View view){//action taken when start button is pressed.
@@ -251,6 +311,24 @@ public class MainActivity extends AppCompatActivity {
         //String message = editText.getText().toString();
         //intent.putExtra(EXTRA_MESSAGE, message);
         startActivity(intent);//launches new intent, which opens new activity(window)
+    }
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+        Intent intent = new Intent(this,TransitionIntentService.class);
+        transitionPendingIntent = PendingIntent.getService(this,0,intent,PendingIntent.FLAG_UPDATE_CURRENT);
+        Log.d(LOG_TAG, "Google client connection status: "+googleApiClient.isConnected()+"");
+        ActivityRecognition.ActivityRecognitionApi.requestActivityUpdates(googleApiClient,10000,transitionPendingIntent);//every 10 seconds
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        googleApiClient.connect();
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+        Log.d(LOG_TAG,connectionResult.getErrorMessage());
     }
 
     /** For testing purposes
